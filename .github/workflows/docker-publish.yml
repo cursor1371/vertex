@@ -1,0 +1,152 @@
+name: PaaS Docker Image
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paas-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOFLAGS: -mod=readonly
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting and shell syntax
+        shell: bash
+        run: |
+          files="$(gofmt -l cmd internal scripts)"
+          if [ -n "$files" ]; then
+            printf 'Go files require gofmt:\n%s\n' "$files"
+            exit 1
+          fi
+          sh -n entrypoint-paas.sh
+          bash -n scripts/test-paas-image.sh
+
+      - name: Vet
+        run: go vet -tags "with_utls with_quic" ./...
+
+      - name: Test
+        run: go test -tags "with_utls with_quic" -count=1 -timeout 15m ./...
+
+      - name: Check Windows build compatibility
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -tags "with_utls with_quic" -trimpath -o "$RUNNER_TEMP/vertex-proxy.exe" ./cmd/vproxy
+
+      - name: Race-check bootstrap and health regression tests
+        env:
+          CGO_ENABLED: "1"
+        run: >-
+          go test -race -tags "with_utls with_quic" -count=1 -timeout 10m
+          -run 'Test(ValidateRulesEnvironment|BuildPAASConfig|BootstrapPAASFiles|PAASRepositoryTemplate|ParseBootstrapNodes|MergeBootstrapNodes|HealthBypasses|HealthException)'
+          ./cmd/vproxy ./internal/api
+
+  publish:
+    needs: verify
+    # PR 不接触发布权限和部署秘密；仅仓库默认分支发布 latest。
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare image metadata
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          version="$(awk '$1 == "go" {print $2; exit}' go.mod | tr -d '\r')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
+          echo "go_version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build local image (do not publish yet)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.paas
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: vertex-paas:ci
+          build-args: |
+            GO_VERSION=${{ steps.image.outputs.go_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Offline container smoke test
+        run: bash scripts/test-paas-image.sh vertex-paas:ci
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the exact tested image
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          docker tag vertex-paas:ci "$IMAGE:sha-$GITHUB_SHA"
+          docker tag vertex-paas:ci "$IMAGE:latest"
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+          hash="$(docker run --rm --network none vertex-paas:ci rules-hash)"
+          {
+            echo '### PaaS image published'
+            echo "$IMAGE:sha-$GITHUB_SHA"
+            echo
+            echo "$IMAGE:latest"
+            echo
+            echo '阅读镜像 rules 命令输出或仓库 cmd/vproxy/rules.txt 后，可确认以下规则版本：'
+            echo "$hash"
+            echo
+            echo '运行时需设置 VPROXY_ACCEPT_RULES_HASH、VPROXY_ADMIN_PASSWORD、VPROXY_API_KEY。'
+            echo 'GHCR 包可见性需单独设置；平台健康检查路径为 /health。'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger Render deployment (optional)
+        env:
+          DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$DEPLOY_HOOK" ]; then
+            if ! curl --fail --silent --max-time 30 -X POST "$DEPLOY_HOOK" -o /dev/null; then
+              echo '镜像已发布，但 Render Deploy Hook 调用失败，请在平台检查部署状态。' >&2
+              exit 1
+            fi
+          fi

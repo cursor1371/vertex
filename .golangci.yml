@@ -1,0 +1,40 @@
+version: "2"
+run:
+  tests: true
+linters:
+  default: none
+  enable:
+    - copyloopvar
+    - errcheck
+    - exhaustive
+    - gochecknoglobals
+    - gochecknoinits
+    - gochecksumtype
+    - govet
+    - staticcheck
+  settings:
+    gochecksumtype:
+      default-signifies-exhaustive: false
+    govet:
+      enable-all: true
+      settings:
+        shadow:
+          strict: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

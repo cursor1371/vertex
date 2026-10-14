@@ -1,0 +1,5 @@
+# 保证 Windows checkout 后的 Linux 容器入口与 CI 脚本使用 LF。
+/entrypoint-paas.sh text eol=lf
+/scripts/test-paas-image.sh text eol=lf
+/Dockerfile.paas text eol=lf
+/.github/workflows/*.yml text eol=lf

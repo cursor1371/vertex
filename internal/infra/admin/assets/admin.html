@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vertex AI Proxy · 控制台</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+
+<body>
+
+  <div class="bg"></div>
+  <div class="bg-veil"></div>
+
+  <div id="login">
+    <div class="box glass">
+      <div class="logo">V</div>
+      <h1>Vertex AI Proxy</h1>
+      <div class="sub">Gemini 原生 API · Vertex 代理</div>
+      <label for="pw" class="sr-only">管理员密码</label><input id="pw" type="password" placeholder="管理员密码"
+        autocomplete="current-password">
+      <button class="btn" onclick="login()">登 录</button>
+      <div class="err" id="loginErr"></div>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <button class="menu-btn" id="menuBtn" onclick="toggleMenu()">☰</button>
+    <aside class="glass">
+      <div class="brand"><span class="mk">V</span> Vertex AI Proxy</div>
+      <nav>
+        <button data-page="overview" class="active"><span class="ic">📊</span> 概览</button>
+        <button data-page="settings"><span class="ic">⚙️</span> 设置</button>
+        <button data-page="keys"><span class="ic">🔑</span> 密钥</button>
+        <button data-page="models"><span class="ic">🧩</span> 模型</button>
+        <button data-page="nodes"><span class="ic">🌐</span> 订阅与并发</button>
+        <button data-page="faults"><span class="ic">🩺</span> 节点故障策略与记录</button>
+        <button data-page="fingerprint"><span class="ic">🔬</span> 浏览器指纹</button>
+        <button data-page="httplog"><span class="ic">📋</span> HTTP 日志</button>
+        <button data-page="logs"><span class="ic">📝</span> 运行日志</button>
+        <button data-page="db"><span class="ic">🗄️</span> 数据库</button>
+        <button data-page="appearance"><span class="ic">🎨</span> 外观</button>
+      </nav>
+      <div class="spacer"></div>
+      <button class="btn ghost" onclick="logout()">退出登录</button>
+    </aside>
+
+    <div class="menu-overlay" id="menuOverlay" onclick="closeMenu()"></div>
+
+    <main>
+      <div class="glass main-glass-bg"></div>
+      <div class="main-content">
+        <section id="page-overview">
+          <div class="page-head">
+            <div>
+              <h2>概览</h2>
+              <div class="hint">服务运行状态与资源概况</div>
+            </div>
+            <button class="btn ghost" onclick="loadOverview()">刷新</button>
+          </div>
+          <div class="grid stats" id="ovCards"></div>
+          <div class="field-heading" style="margin-top:20px;">今日概况</div>
+          <div class="grid stats" id="ovToday" style="margin-top:10px;"></div>
+          <div class="ov-tabs">
+            <button class="btn ov-tab active" data-ovtab="monitor" onclick="showOvTab('monitor')">🛰️ 请求监控</button>
+            <button class="btn ov-tab" data-ovtab="summary" onclick="showOvTab('summary')">📊 统计摘要</button>
+          </div>
+          <div id="ovMonitor" class="ov-panel"></div>
+          <div id="ovSummary" class="ov-panel hidden"></div>
+        </section>
+
+        <section id="page-settings" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>设置</h2>
+              <div class="hint">改动稍后生效，不影响在途请求</div>
+            </div>
+          </div>
+          <div class="card glass" id="settingsForm"></div>
+        </section>
+
+        <section id="page-keys" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>密钥</h2>
+              <div class="hint">对外 API 密钥（name → key）</div>
+            </div>
+          </div>
+          <div class="card glass">
+            <div class="toolbar">
+              <div class="key-input-wrap"><label for="kName" class="sr-only">名称（如 alice）</label><input id="kName"
+                  placeholder="名称（如 alice）"><label for="kKey" class="sr-only">密钥（留空自动生成）</label><input id="kKey"
+                  placeholder="密钥（留空自动生成）"><button class="key-gen-btn" onclick="generateKey()" title="随机生成">✨</button>
+              </div>
+            </div>
+            <div class="toolbar"><label for="kDesc" class="sr-only">描述</label><input id="kDesc"
+                placeholder="描述（可选）"><button class="btn" onclick="addKey()">添加</button></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>密钥</th>
+                    <th>描述</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="keysBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-models" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>模型</h2>
+              <div class="hint">获取上游目录（经节点池）、确认导入/移除、逐模型启停与开关；保存后立即对客户端生效</div>
+            </div>
+            <div class="actions" style="margin:0;">
+              <button class="btn" id="modelsFetchBtn" onclick="fetchUpstreamModels()">获取上游模型</button>
+              <button class="btn" onclick="openAddModelDialog()">添加模型</button>
+              <button class="btn btn-green" onclick="saveModels()">保存</button>
+            </div>
+          </div>
+
+          <div class="card glass">
+            <div class="desc" id="modelsSyncStatus">尚未获取过上游目录。点击「获取上游模型」由服务端经节点池拉取（只更新目录快照，不会改动本地配置）。</div>
+          </div>
+
+          <div class="card glass hidden" id="modelsDiffCard">
+            <div class="field-heading">上游目录差异</div>
+            <div class="desc" id="modelsDiffHint" style="margin:6px 0 10px;"></div>
+            <div id="modelsDiffBody"></div>
+            <div class="actions" id="modelsDiffActions" style="margin-top:12px;"></div>
+          </div>
+
+          <div class="card glass">
+            <div class="toolbar" style="margin-bottom:12px;align-items:center;">
+              <input id="modelsSearch" placeholder="搜索模型名 / 别名…" oninput="renderModelsTable()">
+              <div class="fault-tabs" id="modelsFamilyTabs"></div>
+            </div>
+            <div class="desc" id="modelsTableHint" style="margin-bottom:8px;"></div>
+            <div class="table-wrap">
+              <table class="nodes-table" id="modelsTable">
+                <thead>
+                  <tr>
+                    <th style="width:44px;"><input type="checkbox" id="modelsSelectAll" onchange="toggleSelectAllModels(this.checked)"></th>
+                    <th>模型</th>
+                    <th style="width:110px;">家族</th>
+                    <th>别名</th>
+                    <th style="width:70px;" title="对外暴露「抗截断-」变体（仅文本家族）">抗截断</th>
+                    <th style="width:78px;" title="对外暴露「假非流-」变体（仅文本家族）">非流前缀</th>
+                    <th style="width:78px;" title="历史以模型回合结尾时追加「继续」（仅文本家族）">尾部兼容</th>
+                    <th style="width:150px;">状态</th>
+                    <th style="width:64px;" title="对客户端 API 暴露">启用</th>
+                  </tr>
+                </thead>
+                <tbody id="modelsBody"></tbody>
+              </table>
+            </div>
+            <div class="actions" id="modelsBulkActions" style="margin-top:12px;flex-wrap:wrap;">
+              <button class="btn" onclick="bulkSetModelsEnabled(true)">批量启用</button>
+              <button class="btn" onclick="bulkSetModelsEnabled(false)">批量停用</button>
+              <button class="btn btn-red" onclick="bulkRemoveModels()">批量移除</button>
+              <span class="desc" id="modelsDirtyHint" style="color:var(--gold);"></span>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-nodes" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>代理与节点</h2>
+              <div class="hint">配置并发竞争请求池或锁定订阅节点。</div>
+            </div>
+          </div>
+          <div class="grid grid-1">
+            <div class="card glass">
+              <div class="field"><label for="globalProxy">前置代理池导入 (SOCKS5/HTTP/VLESS 等)</label>
+                <div class="toolbar m-0"><input id="globalProxy" placeholder="socks5://127.0.0.1:1080 或 vless://..."><button
+                    class="btn" onclick="importProxyNode()">导入</button></div>
+                <div class="desc">导入的节点进入前置代理轮询池，作为出口请求的第一跳 SOCKS5 通道；池为空或全部禁用时透明降级直连。</div>
+              </div>
+              <div class="divider"></div>
+              <div class="field m-0">
+                <div class="field-heading">前置代理池列表</div>
+                <div class="toolbar m-0 gap-8">
+                  <button class="btn ghost" onclick="testAllProxyNodes()">批量测试</button>
+                  <button class="btn ghost" onclick="dedupProxyNodes()">去重</button>
+                  <button class="btn ghost" onclick="deleteDisabledProxyNodes()">清空禁用</button>
+                  <button class="btn ghost" onclick="unlockAllProxyNodes()">一键解除防删</button>
+                  <div style="display:flex; align-items:center; gap:10px; margin-left:auto;">
+                    <span
+                      style="font-size:calc(var(--base-font-size) * 13 / 14); color:var(--text); font-weight:500; white-space:nowrap;">只看防删节点</span>
+                    <label class="toggle">
+                      <input type="checkbox" id="proxyOnlyLockedCheck" onchange="setProxyOnlyLocked(this.checked)">
+                      <span class="track"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="table-wrap">
+<table class="proxy-candidates-table">
+                    <thead>
+                      <tr>
+                        <th>名称</th>
+                        <th>类型</th>
+                        <th>测试状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="proxyNodesBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div class="card glass">
+              <div class="field field-mb-20px">
+                <div class="field-heading label-gold">文件优选导入 (V2RayN / Clash 优选节点)</div>
+                <div class="toolbar m-0 gap-8">
+                  <label for="nodeImportFile" class="sr-only">选择节点导入文件</label><input type="file" id="nodeImportFile"
+                    accept=".txt,.yaml,.yml,.json,.conf,.list" class="file-input">
+                  <button class="btn ghost" onclick="importFileNodes(false)">导入追加</button>
+                  <button class="btn danger" onclick="importFileNodes(true)">清空并替换</button>
+                </div>
+                <div class="desc">导入本地导出的节点配置文件 (.txt / .yaml)。支持以追加或覆盖形式批量配置节点。</div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="toolbar"><label for="subUrl" class="sr-only">订阅链接</label><input id="subUrl"
+                  placeholder="订阅链接 (vless/vmess/trojan/ss/ssr...)"><button class="btn"
+                  onclick="addAndFetchSub()">拉取并保存</button></div>
+              <div class="desc summary-text" id="nodesSummary">当前共 0 个节点</div>
+              <div id="globalFaultBanner" class="hidden"></div>
+              <div class="actions">
+                <button class="btn ghost" onclick="testAllNodes()">批量测试</button>
+                <button class="btn ghost" id="btnSortByLatency" onclick="sortNodesByLatencyToggle()">按延迟升序排序</button>
+                <button class="btn ghost" onclick="dedupNodes()">一键去重</button>
+                <button class="btn ghost" onclick="lockHealthyNodes()">一键防删</button>
+                <button class="btn ghost" onclick="unlockAllNodes()">一键解除防删</button>
+                <button class="btn ghost" onclick="exportNodes()">导出节点</button>
+                <button class="btn ghost" onclick="go('faults')"
+                  title="查看按类别归因的失败详情与处理策略（含错误码、HTTP 状态码、脱敏原文与首末发生时间，可一键复制）">节点故障策略与记录</button>
+                <button class="btn danger" onclick="deleteDisabledNodes()">删除禁用节点</button>
+              </div>
+              <div class="divider"></div>
+              <div class="actions">
+                <span class="desc" title="当前勾选的节点数">已选 <span id="selCount"
+                    style="color:var(--text);font-weight:600;">0</span> 个</span>
+                <button class="btn ghost btn-blue" onclick="toggleSelectAllNodes()">全选/反选</button>
+                <button class="btn ghost btn-green" onclick="batchEnableSelectedNodes()">批量启用</button>
+                <button class="btn ghost btn-red" onclick="batchDisableSelectedNodes()">批量禁用</button>
+                <button class="btn ghost btn-blue" onclick="batchImportSelectedToProxyPool()">导入前置代理池</button>
+                <button class="btn danger" onclick="batchDeleteSelectedNodes()">批量删除</button>
+              </div>
+              <div id="testProgress" class="test-progress">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                  <div id="testProgressText" class="test-progress-text" style="margin-bottom:0;">准备测试...</div>
+                  <div style="display:flex; gap:8px;">
+                    <button class="btn ghost" id="btnTestPauseResume" style="padding:2px 10px; font-size:12px;"
+                      onclick="toggleTestPauseResume()">暂停</button>
+                    <button class="btn danger" style="padding:2px 10px; font-size:12px;"
+                      onclick="terminateTestAll()">终止</button>
+                  </div>
+                </div>
+                <div class="progress-track">
+                  <div id="testProgressFill" class="progress-fill"></div>
+                </div>
+                <div id="testProgressDetail" class="test-progress-detail"></div>
+              </div>
+              <div id="crossPageSelectBanner" class="test-progress"
+                style="display:none; background: rgba(143,208,232,0.15); border: 1px solid var(--blue); color: var(--text); padding: 8px 12px; border-radius: 6px; margin-bottom: 10px;">
+                <span id="crossPageSelectText"></span>
+                <button class="btn ghost btn-blue" style="margin-left:12px; padding:2px 8px; font-size:12px;"
+                  onclick="selectAllNodesAcrossPages()">全选所有页共 <span id="crossPageSelectTotal">0</span> 个节点</button>
+              </div>
+              <div class="req-toolbar" style="margin:0 0 10px;">
+                <span
+                  style="font-size:calc(var(--base-font-size) * 13 / 14); color:var(--text); font-weight:500; white-space:nowrap;">启用状态</span>
+                <label for="nodeDisabledFilterSelect" class="sr-only">启用状态筛选</label>
+                <select id="nodeDisabledFilterSelect" onchange="setNodeDisabledFilter(this.value)"
+                  style="width:auto;margin:0;">
+                  <option value="">全部</option>
+                  <option value="enabled">只看启用</option>
+                  <option value="disabled_health">只看禁用（健康·可自愈）</option>
+                  <option value="disabled_manual">只看禁用（需人工恢复）</option>
+                </select>
+                <span class="desc">健康禁用（自动探测失败达阈值前）可被自动探测恢复；其余来源（人工、测试失败、协议不支持、持续不可恢复）都必须手动启用。</span>
+              </div>
+              <div class="toolbar" style="flex-wrap:wrap; row-gap:8px;">
+                <label for="nodeSearch" class="sr-only">搜索节点</label>
+                <input id="nodeSearch" placeholder="搜索节点名称 / 地址…" oninput="onNodeSearchInput(this.value)"
+                  style="max-width:280px;">
+                <button class="btn ghost" onclick="clearNodeSearch()">清除</button>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <span
+                    style="font-size:calc(var(--base-font-size) * 13 / 14); color:var(--text); font-weight:500; white-space:nowrap;">防删节点</span>
+                  <label for="nodeLockedFilterSelect" class="sr-only">防删节点筛选</label>
+                  <select id="nodeLockedFilterSelect" onchange="setNodeLockedFilter(this.value)"
+                    style="width:auto;margin:0;">
+                    <option value="">忽略</option>
+                    <option value="only">只看防删</option>
+                    <option value="hide">隐藏防删</option>
+                  </select>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <span
+                    style="font-size:calc(var(--base-font-size) * 13 / 14); color:var(--text); font-weight:500; white-space:nowrap;"
+                    title="rT 档位来自后端选点判据：0 健康 / 1 偏差（连败、挂住或最近抓取超慢）/ 2 冷却中。仅反映 rT 抓取健康度，与普通请求的可用性无关">rT
+                    档位</span>
+                  <label for="nodeRTFilterSelect" class="sr-only">rT 档位筛选</label>
+                  <select id="nodeRTFilterSelect" onchange="setNodeRTFilter(this.value)" style="width:auto;margin:0;">
+                    <option value="">全部</option>
+                    <option value="abnormal">仅异常 (≥1)</option>
+                    <option value="0">仅健康 (0)</option>
+                    <option value="1">仅偏差 (1)</option>
+                    <option value="2">仅冷却 (2)</option>
+                  </select>
+                </div>
+                <span class="desc" style="white-space:nowrap;">排序</span>
+                <select id="nodeSortSelect" onchange="onNodeSortChange(this.value)" style="width:auto;margin:0;">
+                  <option value="default">默认顺序</option>
+                  <option value="requests">成功次数</option>
+                  <option value="success_rate">成功率</option>
+                  <option value="race_wins">Racing 成功次数</option>
+                  <option value="race_rate">Racing 成功率</option>
+                  <option value="rt_rank">rT 档位（异常在前）</option>
+                </select>
+                <button class="btn ghost" id="btnNodeSortDir" onclick="toggleNodeSortDir()">降序</button>
+                <span class="desc">统计口径：请求级 · 全部历史</span>
+              </div>
+              <div class="table-wrap">
+                <table class="nodes-table">
+                  <thead>
+                    <tr>
+                      <th class="th-center"><label for="selectAllNodesCheckbox" class="sr-only">全选</label><input
+                          type="checkbox" id="selectAllNodesCheckbox" onclick="toggleSelectAllNodesCheckbox(this)"></th>
+                      <th>节点名 & 连接属性</th>
+                      <th>协议</th>
+                      <th>成功/成功率</th>
+                      <th>Racing 成功/成功率</th>
+                      <th>状态/延迟</th>
+                      <th id="nodeThRTRank" role="columnheader" aria-sort="none" title="点击按 rT 档位排序（0 健康 / 1 偏差 / 2 冷却中）"
+                        style="cursor:pointer; user-select:none;" onclick="sortNodesByRTRank()">rT<span
+                        id="nodeRTRankArrow"></span></th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="nodesBody"></tbody>
+                </table>
+              </div>
+              <div id="nodesPaginationBar" class="toolbar m-0 gap-8"
+                style="margin-top: 12px; justify-content: space-between; align-items: center;">
+                <div id="nodesPaginationInfo" style="font-size: 13px; color: var(--text-dim);"></div>
+                <div class="flex-gap-11" style="display: flex; gap: 8px; align-items: center;">
+                  <button class="btn ghost" id="btnPageFirst" onclick="changeNodePage(1)">首页</button>
+                  <button class="btn ghost" id="btnPagePrev" onclick="changeNodePage(curNodePage - 1)">上一页</button>
+                  <span id="nodesPageNumDisplay" style="font-size: 13px; font-weight: 600; padding: 0 6px;">1 / 1</span>
+                  <button class="btn ghost" id="btnPageNext" onclick="changeNodePage(curNodePage + 1)">下一页</button>
+                  <button class="btn ghost" id="btnPageLast" onclick="changeNodePage(totalNodePages)">末页</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-appearance" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>外观</h2>
+              <div class="hint">自定义控制台背景</div>
+            </div>
+          </div>
+          <div class="card glass">
+            <div class="field"><label for="bgUrl">图片 URL</label>
+              <div class="toolbar m-0"><input id="bgUrl" placeholder="粘贴图片 URL…"><button class="btn"
+                  onclick="applyBgUrl()">应用</button></div>
+            </div>
+            <div class="field">
+              <div class="field-heading">从本地上传</div>
+              <div class="flex-gap-11"><button class="btn ghost"
+                  onclick="document.getElementById('bgFile').click()">选择图片…</button><button class="btn ghost"
+                  onclick="resetBg()">恢复默认</button></div>
+              <label for="bgFile" class="sr-only">上传背景图片</label><input id="bgFile" type="file" accept="image/*"
+                class="hidden" onchange="uploadBg(event)">
+            </div>
+            <div class="field m-0">
+              <div class="field-heading">图片预设</div>
+              <div class="preset" id="presets"></div>
+            </div>
+          </div>
+
+          <div class="card glass" style="margin-top:20px;">
+            <div class="field-heading">背景设置</div>
+            <div class="appearance-advanced">
+              <div class="font-ctrl-group align-top">
+                <span>纯色预设:</span>
+                <div class="preset" id="presetsColor"></div>
+              </div>
+              <div class="font-ctrl-group align-top" id="customPresetsRow" style="display:none; margin-top: 4px;">
+                <span>自定义预设:</span>
+                <div class="preset" id="presetsCustom"></div>
+              </div>
+              <div class="font-ctrl-group" style="margin-top: 12px; margin-bottom: 20px;">
+                <span>自定义单色背景:</span>
+                <div class="color-preview-box" id="bgColorBox" onclick="setActiveColorTarget('bg', -1, null, event)"
+                  title="点击编辑单色背景"></div>
+                <button class="btn ghost" onclick="saveCustomPreset('color')" style="margin-left:12px;">保存为预设</button>
+              </div>
+            </div>
+
+            <div class="field-heading mt-20">自定义渐变 (选区)</div>
+            <div class="gradient-builder" style="margin-bottom: 20px;">
+              <div class="gradient-stops" id="gradientStops"></div>
+              <div class="flex-gap-11" style="margin-top: 8px;">
+                <button class="btn ghost" onclick="addGradientStop()">+ 添加色标</button>
+                <button class="btn ghost" onclick="applyGradient()">应用渐变</button>
+                <button class="btn ghost" onclick="saveCustomPreset('gradient')">保存为预设</button>
+              </div>
+            </div>
+
+            <div class="field-heading mt-20">字体设置</div>
+            <div class="appearance-advanced">
+              <div class="font-ctrl-group">
+                <span>基础字号:</span>
+                <button class="btn ghost" onclick="adjustFontSize(-1)">A-</button>
+                <span id="currentFontSize" style="min-width: 40px; text-align: center;">14px</span>
+                <button class="btn ghost" onclick="adjustFontSize(1)">A+</button>
+              </div>
+              <div class="font-ctrl-group">
+                <span>字体颜色:</span>
+                <button class="btn ghost" id="btnColorAdaptive" onclick="setFontColorType('adaptive')">自适应</button>
+                <button class="btn ghost" id="btnColorSpecified" onclick="setFontColorType('specified')">指定色</button>
+                <div class="color-preview-box" id="fontColorBox" onclick="setActiveColorTarget('font', -1, null, event)"
+                  title="点击编辑字体颜色"></div>
+              </div>
+            </div>
+
+            <div class="color-palette-container" id="colorPaletteContainer">
+              <div class="palette-header" id="paletteHeaderDrag">
+                <div class="palette-title">CUSTOM COLOR PALETTE</div>
+                <div class="drag-icon" title="拖动">⤡</div>
+              </div>
+
+              <div class="palette-tools">
+                <div class="palette-preview" id="palettePreview"></div>
+                <button class="btn ghost btn-icon palette-btn" onclick="activateEyeDropper()" title="吸管工具">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m2 22 6-6" />
+                    <path d="m22 2-6 6" />
+                    <path d="m13 5.5 5.5 5.5" />
+                    <path d="m5.5 13 5.5 5.5" />
+                    <path
+                      d="m17.5 3.5 3 3c.8.8.8 2.2 0 3l-6 6c-.8.8-2.2.8-3 0l-5-5c-.8-.8-.8-2.2 0-3l6-6c.8-.8 2.2-.8 3 0z" />
+                  </svg>
+                  <span>取色工具</span>
+                </button>
+                <button class="btn ghost btn-icon palette-btn" title="重置" onclick="resetColorTarget()">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                  </svg>
+                  <span>重置颜色</span>
+                </button>
+              </div>
+
+              <div class="palette-interactive">
+                <div class="sv-panel" id="svPanel">
+                  <div class="sv-bg-white"></div>
+                  <div class="sv-bg-black"></div>
+                  <div class="sv-cursor" id="svCursor"></div>
+                </div>
+
+                <div class="hue-slider" id="hueSlider">
+                  <div class="hue-cursor" id="hueCursor"></div>
+                </div>
+              </div>
+
+              <div class="palette-inputs">
+                <div class="input-row hex-row">
+                  <span class="input-label">HEX</span>
+                  <input type="text" id="hex-input" class="hex-input" value="#FF0000" onchange="updateFromHEX()"
+                    oninput="updateFromHEX()">
+                </div>
+                <div class="input-row rgb-row">
+                  <span class="input-label">RGB</span>
+                  <label>R: <input type="number" id="rgb-r" min="0" max="255" value="255" onchange="updateFromRGB()"
+                      oninput="updateFromRGB()"></label>
+                  <label>G: <input type="number" id="rgb-g" min="0" max="255" value="0" onchange="updateFromRGB()"
+                      oninput="updateFromRGB()"></label>
+                  <label>B: <input type="number" id="rgb-b" min="0" max="255" value="0" onchange="updateFromRGB()"
+                      oninput="updateFromRGB()"></label>
+                </div>
+                <div class="input-row hsb-row">
+                  <span class="input-label">HSB</span>
+                  <label>H: <input type="number" id="hsb-h" min="0" max="360" value="0" onchange="updateFromHSB()"
+                      oninput="updateFromHSB()"></label>
+                  <label>S: <input type="number" id="hsb-s" min="0" max="100" value="100" onchange="updateFromHSB()"
+                      oninput="updateFromHSB()"></label>
+                  <label>B: <input type="number" id="hsb-b" min="0" max="100" value="100" onchange="updateFromHSB()"
+                      oninput="updateFromHSB()"></label>
+                </div>
+              </div>
+            </div>
+
+
+          </div>
+        </section>
+
+        <section id="page-fingerprint" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>浏览器指纹</h2>
+              <div class="hint">TLS 指纹与请求头（UA）相互独立、可任意组合（预设只读，手动导入可编辑）</div>
+            </div>
+          </div>
+
+          <div class="card glass">
+            <div class="field bool m-0">
+              <div class="min-w-0">
+                <label for="fpEnabled">自定义浏览器指纹</label>
+                <div class="desc mt-4px">总开关（默认关）。关闭时逐字节保持默认行为：TLS 指纹在 Chrome 144/146 间随机 + Chrome 150 请求头。开启后改变实际发出的请求特征——若上游校验失败，关闭本开关即可完整回退，无需返工。</div>
+              </div>
+              <label class="toggle"><input type="checkbox" id="fpEnabled" onchange="fpOnEnabledChange()"><span
+                  class="track"></span></label>
+            </div>
+
+            <div class="field" id="fpTLSModeField">
+              <label for="fpTLSMode">TLS 指纹策略（与请求头 UA 独立）</label>
+              <select id="fpTLSMode" onchange="fpMarkDirty(); fpRenderTLSMode()">
+                <option value="follow">跟随预设（与所选预设同版本）</option>
+                <option value="legacy">默认随机（Chrome 144/146）</option>
+                <option value="single">单值（固定一个 profile）</option>
+                <option value="range">版本区间（上下界内随机）</option>
+                <option value="list">显式列表（勾选多个）</option>
+              </select>
+              <div class="desc">TLS 与请求头版本不一致（如 TLS 144 + UA 150）是允许的组合，但会提高被识别概率。区间/列表的实际随机池见下方解析结果。</div>
+              <div id="fpTLSSingleWrap" class="hidden" style="margin-top:8px;">
+                <label for="fpTLSSingle" class="sr-only">TLS profile</label>
+                <select id="fpTLSSingle" onchange="fpMarkDirty(); fpRenderTLSPool()"></select>
+              </div>
+              <div id="fpTLSRangeWrap" class="hidden" style="margin-top:8px; display:flex; gap:10px; align-items:center;">
+                <span class="desc">版本</span>
+                <input type="number" id="fpTLSMin" min="100" max="999" style="width:90px;" oninput="fpMarkDirty(); fpRenderTLSPool()">
+                <span class="desc">~</span>
+                <input type="number" id="fpTLSMax" min="100" max="999" style="width:90px;" oninput="fpMarkDirty(); fpRenderTLSPool()">
+              </div>
+              <div id="fpTLSListWrap" class="hidden" style="margin-top:8px; display:flex; gap:14px; flex-wrap:wrap;"></div>
+              <div class="desc" id="fpTLSPoolResolved" style="margin-top:8px;"></div>
+            </div>
+
+            <div class="field" id="fpLocaleField">
+              <label for="fpLocale">地区语言</label>
+              <select id="fpLocale" onchange="fpMarkDirty()"></select>
+              <div class="desc">同源作用于 Accept-Language、reCAPTCHA hl、上游请求体的 locale/timezone，避免四处各写各的导致自相矛盾。</div>
+            </div>
+
+            <div class="field" id="fpModeField">
+              <label for="fpMode">请求头来源（UA 与客户端提示）</label>
+              <select id="fpMode" onchange="fpMarkDirty(); fpRenderMode()">
+                <option value="preset">预设（只读）</option>
+                <option value="custom">手动导入（可编辑）</option>
+              </select>
+              <div class="desc">预设由程序内置，只能选择、不能修改；手动导入保存在独立的配置项中，随时可再次编辑覆盖，不会影响任何预设。</div>
+            </div>
+            <div id="fpPresetArea"></div>
+            <div id="fpCustomArea"></div>
+          </div>
+
+          <div class="card glass" style="margin-top:20px;">
+            <div class="field-heading">当前生效预览</div>
+            <div id="fpEffective" class="desc">加载中…</div>
+            <div class="flex-gap-11" style="margin-top:12px;">
+              <button class="btn" onclick="saveFingerprint()">保存并应用</button>
+              <button class="btn ghost" onclick="loadFingerprint()">放弃更改</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-httplog" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>HTTP 日志</h2>
+              <div class="hint">上游请求级日志（需在设置中开启 http_log）</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:16px;">
+              <button class="btn ghost" onclick="loadHTTPLog()">刷新</button>
+              <button class="btn ghost" onclick="httpLogExport()">导出</button>
+              <button class="btn ghost" onclick="httpLogImport()">导入</button>
+              <button class="btn ghost" onclick="toggleHTTPLogCols()">列显示</button>
+              <button class="btn danger" onclick="resetHTTPLog()">清空</button>
+            </div>
+          </div>
+          <div class="card glass" style="margin-top:14px;">
+            <div class="req-toolbar" style="margin:0;">
+              <select id="httpLogSuccess" style="width:auto;" onchange="loadHTTPLog(true)">
+                <option value="">请求状态</option>
+                <option value="1">成功</option>
+                <option value="0">失败</option>
+              </select>
+              <input id="httpLogScope" list="httpLogScopeList" placeholder="范围" style="width:110px;"
+                onkeydown="if(event.key==='Enter')loadHTTPLog(true)">
+              <datalist id="httpLogScopeList">
+                <option value="batchgraphql"></option><option value="recaptcha"></option><option value="other"></option>
+              </datalist>
+              <input id="httpLogReqID" type="text" placeholder="request_id" style="width:170px;"
+                onkeydown="if(event.key==='Enter')loadHTTPLog(true)">
+              <input id="httpLogNode" type="text" placeholder="节点" style="width:140px;"
+                onkeydown="if(event.key==='Enter')loadHTTPLog(true)">
+              <input id="httpLogPeerIP" type="text" placeholder="对端 IP" style="width:120px;"
+                onkeydown="if(event.key==='Enter')loadHTTPLog(true)">
+              <input id="httpLogHTTPStatus" type="text" placeholder="HTTP状态码" style="width:100px;"
+                onkeydown="if(event.key==='Enter')loadHTTPLog(true)">
+              <input id="httpLogRespCode" type="text" placeholder="业务响应码" style="width:100px;"
+                onkeydown="if(event.key==='Enter')loadHTTPLog(true)">
+              <input id="httpLogErrorType" type="text" placeholder="失败类型" style="width:120px;"
+                onkeydown="if(event.key==='Enter')loadHTTPLog(true)">
+              <input id="httpLogFrom" type="datetime-local" onchange="loadHTTPLog(true)">
+              <span class="desc">至</span>
+              <input id="httpLogTo" type="datetime-local" onchange="loadHTTPLog(true)">
+              <button class="btn ghost" onclick="loadHTTPLog(true)">筛选</button>
+              <button class="btn ghost" onclick="resetHTTPLogFilters()">重置</button>
+            </div>
+          </div>
+          <div id="httpLogColPanel" class="httplog-cols hidden"></div>
+          <div class="card glass" style="margin-top:14px;">
+            <div class="req-toolbar">
+              <div class="field-heading" style="margin:0;">请求记录 <span class="label-gold" id="httpLogTotal"></span></div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button class="btn ghost" onclick="goHTTPLogPage(httpLogPage-1)" style="padding:4px 10px;">上一页</button>
+                <span class="desc" id="httpLogPageInfo"></span>
+                <button class="btn ghost" onclick="goHTTPLogPage(httpLogPage+1)" style="padding:4px 10px;">下一页</button>
+              </div>
+            </div>
+            <div class="table-wrap"><table class="stats-table">
+              <thead><tr id="httpLogHead"></tr></thead>
+              <tbody id="httpLogTbody"></tbody>
+            </table></div>
+          </div>
+          <div id="httpLogDetail"></div>
+        </section>
+
+        <section id="page-logs" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>运行日志</h2>
+              <div class="hint">系统最近 200 条日志</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:16px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span
+                  style="font-size:calc(var(--base-font-size) * 13 / 14); color:var(--text); font-weight:500;">自动刷新</span>
+                <label class="toggle">
+                  <input type="checkbox" id="autoRefreshLogsCheck" checked onchange="toggleAutoRefreshLogs()">
+                  <span class="track"></span>
+                </label>
+              </div>
+              <button class="btn ghost" onclick="loadLogs()">立即刷新</button>
+              <button class="btn danger" onclick="clearLogs()">清空运行日志</button>
+            </div>
+          </div>
+          <div class="card glass">
+            <div class="table-wrap" id="logContentUI" style="max-height: 60vh; overflow-y: auto;">
+              <table id="logsTable">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>级别</th>
+                    <th>消息</th>
+                  </tr>
+                </thead>
+                <tbody id="logUITbody" class="font-mono" style="font-size: 0.9em;"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-db" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>数据库</h2>
+              <div class="hint">体积体检、历史清理与空间回收（data.db）</div>
+            </div>
+            <button class="btn ghost" onclick="loadDB()">刷新</button>
+          </div>
+
+          <div class="grid grid-2" style="margin-top:14px;">
+            <div class="card glass">
+              <div class="field-heading" style="margin-top:0;">空间占用</div>
+              <table class="stats-table"><tbody id="dbSpaceRows"></tbody></table>
+            </div>
+            <div class="card glass">
+              <div class="field-heading" style="margin-top:0;">表与时间跨度</div>
+              <table class="stats-table">
+                <thead><tr><th>表</th><th>行数</th><th>最早</th><th>最新</th></tr></thead>
+                <tbody id="dbTableRows"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card glass" style="margin-top:14px;">
+            <div class="field-heading" style="margin-top:0;">一键清理并回收空间</div>
+            <div class="hint">
+              按保留天数删除 <b>race_log / usage_log / http_log</b> 三张日志表中的超期记录，随后回收空间、执行
+              WAL checkpoint 并做完整性校验。只删早于指定天数的日志，保留期内数据与节点/密钥等业务数据不受影响；
+              删除前会弹出确认。结果区会给出每张表的删除行数、实际回收字节与前后体积。
+            </div>
+            <div class="req-toolbar" style="margin-top:10px;">
+              <input id="dbMaintainDays" type="number" min="0" max="3650" value="7" style="width:110px;">
+              <span class="desc">天之前的记录（0 = 不清理，仅回收空间）</span>
+              <label class="desc" style="display:flex;align-items:center;gap:6px;margin:0;">
+                <input id="dbMaintainInit" type="checkbox">
+                未启用增量回收时顺带做一次性初始化（需约 1.1× 库大小的临时空间）
+              </label>
+              <button class="btn" id="dbMaintainBtn" onclick="dbMaintain()">清理并回收空间</button>
+            </div>
+            <div class="hint" id="dbMaintainProgress"></div>
+            <div id="dbMaintainResult"></div>
+          </div>
+
+          <div class="card glass" style="margin-top:14px;">
+            <div class="field-heading" style="margin-top:0;">空间回收</div>
+            <div class="hint" id="dbReclaimHint"></div>
+            <div class="req-toolbar" style="margin-top:10px;">
+              <button class="btn ghost" onclick="dbVacuum('incremental')">增量回收空间</button>
+              <button class="btn ghost" onclick="dbVacuum('init_incremental')">初始化增量回收</button>
+              <button class="btn ghost" onclick="dbVacuum('full')">完整 VACUUM</button>
+              <button class="btn ghost" onclick="dbCheck()">完整性检查</button>
+              <span class="desc" id="dbCheckResult"></span>
+            </div>
+          </div>
+
+          <div class="card glass" style="margin-top:14px;">
+            <div class="field-heading" style="margin-top:0;">清理历史记录</div>
+            <div class="hint">删除三张日志表中早于指定天数的记录。此操作只删数据、不释放文件空间，删除后请用上方「增量回收空间」。</div>
+            <div class="req-toolbar" style="margin-top:10px;">
+              <input id="dbPruneDays" type="number" min="1" max="3650" value="7" style="width:110px;">
+              <span class="desc">天之前的记录</span>
+              <button class="btn danger" onclick="dbPrune()">清理</button>
+            </div>
+          </div>
+
+          <div class="card glass" style="margin-top:14px;">
+            <div class="field-heading" style="margin-top:0;">清空整表</div>
+            <div class="hint">整表清空不可恢复；清空后请用上方「增量回收空间」释放文件空间。</div>
+            <div class="req-toolbar" style="margin-top:10px;">
+              <select id="dbClearTable" style="width:auto;">
+                <option value="race_log">race_log（竞速明细）</option>
+                <option value="usage_log">usage_log（请求统计）</option>
+                <option value="http_log">http_log（HTTP 请求日志）</option>
+                <option value="all">全部三张表</option>
+              </select>
+              <button class="btn danger" onclick="dbClear()">清空</button>
+            </div>
+          </div>
+
+          <div class="card glass" style="margin-top:14px;">
+            <div class="field-heading" style="margin-top:0;">离线压缩（文件级回收）</div>
+            <div class="hint">
+              增量回收只归还空闲页，文件本身不会缩小；若文件已膨胀到数十 GB（历史删除留下的空洞），
+              需要离线压缩：停止服务后运行 <b>scripts/压缩数据库.bat</b>（或 <code>vertex-proxy vacuum</code>），
+              它会重建库文件并在新库上开启 auto_vacuum=INCREMENTAL，此后清理即可自动回收空间。
+            </div>
+          </div>
+        </section>
+
+        <section id="page-faults" class="hidden">
+          <div class="page-head">
+            <div>
+              <h2>节点故障策略与记录</h2>
+              <div class="hint">按类别查看失败详情（含脱敏原文、错误码与时间），并配置每类故障的处理方式</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn ghost" onclick="copyAllFaults()">一键复制全部</button>
+              <button class="btn ghost" onclick="refreshFaultsPage()">刷新</button>
+              <button class="btn danger" onclick="clearNodeFaults()">清空记录</button>
+              <button class="btn ghost" onclick="resetAllFaultPolicies()">还原全部策略</button>
+            </div>
+          </div>
+
+          <div class="fault-tabs" style="margin-top:14px;">
+            <button id="faultTabRecords" class="fault-tab active" onclick="switchFaultTab('records')">故障记录</button>
+            <button id="faultTabPolicies" class="fault-tab" onclick="switchFaultTab('policies')">处理策略</button>
+            <button id="faultTabParams" class="fault-tab" onclick="switchFaultTab('params')">探测与保护参数</button>
+          </div>
+
+          <div id="faultPaneRecords" style="margin-top:12px;">
+            <div class="desc" id="nodeFaultsHead" style="margin-bottom:8px;"></div>
+            <div id="nodeFaultsClasses" class="fault-chips"></div>
+            <div style="overflow:auto;margin-top:8px;">
+              <table class="fault-table">
+                <thead>
+                  <tr>
+                    <th>节点</th><th>类别</th><th>错误码</th><th>HTTP</th>
+                    <th>次数</th><th>首次发生</th><th>最近发生</th><th>发现来源</th>
+                  </tr>
+                </thead>
+                <tbody id="nodeFaultsList"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="faultPanePolicies" class="hidden" style="margin-top:12px;">
+            <div class="desc" id="policiesHead" style="margin-bottom:8px;line-height:1.7;"></div>
+            <div id="policiesEntryNote" class="policy-note hidden"></div>
+            <table class="fault-table">
+              <thead>
+                <tr>
+                  <th>故障类别</th><th>当前处理方式</th><th>探测失败阈值</th>
+                  <th>生效来源</th><th>默认值</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="policiesList"></tbody>
+            </table>
+          </div>
+
+          <div id="faultPaneParams" class="hidden" style="margin-top:12px;">
+            <div class="desc" id="faultParamsHead" style="margin-bottom:10px;line-height:1.7;"></div>
+            <div class="card glass">
+              <div id="faultParamsFields"></div>
+              <div class="actions" style="margin-top:14px;align-items:center;gap:10px;">
+                <button class="btn" onclick="saveFaultParams()">保存参数</button>
+                <button class="btn ghost" onclick="loadFaultParams()">放弃修改并重载</button>
+                <span class="desc" id="faultParamsDirty" style="color:var(--gold);"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast glass" id="toast"></div>
+
+  <div id="confirmModal" class="hidden"
+    style="position:fixed;inset:0;display:grid;place-items:center;z-index:9999;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);transition:opacity .3s var(--ease);">
+    <div class="box glass" style="width:340px;padding:32px 24px;text-align:center;animation:pop .4s var(--ease);">
+      <h3 style="margin-bottom:12px;font-size:16px;">未保存的更改</h3>
+      <div style="color:var(--text-dim);margin-bottom:24px;font-size:13px;" id="confirmModalText">
+        您对设置进行了修改且未保存，离开将丢失这些更改。确认离开吗？</div>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button class="btn ghost" id="confirmCancelBtn" style="flex:1;">取消</button>
+        <button class="btn danger" id="confirmOkBtn" style="flex:1;">确认离开</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="changePasswordModal" class="hidden"
+    style="position:fixed;inset:0;display:grid;place-items:center;z-index:9999;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);transition:opacity .3s var(--ease);">
+    <div class="box glass" style="width:360px;padding:32px 24px;text-align:left;animation:pop .4s var(--ease);">
+      <h3 style="margin-bottom:18px;font-size:16px;text-align:center;">修改后台管理员密码</h3>
+      <div class="field" style="margin-bottom:14px;">
+        <label for="oldPwInput">原密码</label>
+        <input type="password" id="oldPwInput" placeholder="请输入当前使用的密码">
+      </div>
+      <div class="field" style="margin-bottom:14px;">
+        <label for="newPwInput">新密码</label>
+        <input type="password" id="newPwInput" placeholder="至少 6 位新密码">
+      </div>
+      <div class="field" style="margin-bottom:20px;">
+        <label for="confirmPwInput">确认新密码</label>
+        <input type="password" id="confirmPwInput" placeholder="请再次输入新密码">
+      </div>
+      <div class="err" id="changePwErr" style="color:#ff5f56;font-size:12px;margin-bottom:12px;text-align:center;">
+      </div>
+      <div style="display:flex;gap:12px;justify-content:flex-end;">
+        <button class="btn ghost" onclick="closeChangePasswordModal()">取消</button>
+        <button class="btn" onclick="submitChangePassword()">确定修改</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addModelModal" class="hidden"
+    style="position:fixed;inset:0;display:grid;place-items:center;z-index:9999;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);transition:opacity .3s var(--ease);">
+    <div class="box glass" style="width:420px;max-width:calc(100vw - 32px);padding:28px 24px;text-align:left;animation:pop .4s var(--ease);">
+      <h3 style="margin-bottom:16px;font-size:16px;text-align:center;">添加模型</h3>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="addModelName">模型名（上游模型 ID，可添加目录中不存在的自定义模型）</label>
+        <input id="addModelName" class="font-mono" placeholder="例如 gemini-4-argon">
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="addModelFamily">家族</label>
+        <select id="addModelFamily">
+          <option value="">自动（按名称判断，默认文本）</option>
+          <option value="text">文本</option>
+          <option value="image">图片</option>
+          <option value="audio">音频</option>
+          <option value="vedio">视频</option>
+        </select>
+        <div class="desc">视频（vedio）模型可添加与查看，但后端能力尚未实现，不可启用。</div>
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="addModelAlias">别名（可选，客户端可用该名字调用）</label>
+        <input id="addModelAlias" placeholder="例如 my-model">
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="addModelEnable" style="width:auto;" checked> 添加后立即启用（对客户端 API 暴露）
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <input type="checkbox" id="addModelAnti" style="width:auto;"> 抗截断（暴露「抗截断-」变体）
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <input type="checkbox" id="addModelNonStream" style="width:auto;"> 非流前缀（暴露「假非流-」变体）
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <input type="checkbox" id="addModelTrailing" style="width:auto;"> 尾部兼容（历史以模型回合结尾时追加「继续」）
+        </label>
+        <div class="desc" id="addModelSwitchHint">三个开关仅对文本家族生效；勾选即写入显式配置（不勾选 = 跟随家族默认：文本默认开启抗截断与非流前缀）。</div>
+      </div>
+      <div class="err" id="addModelErr" style="color:#ff5f56;font-size:12px;margin-bottom:12px;text-align:center;"></div>
+      <div style="display:flex;gap:12px;justify-content:flex-end;">
+        <button class="btn ghost" onclick="closeAddModelDialog()">取消</button>
+        <button class="btn" onclick="submitAddModel()">添加</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="utils.js"></script>
+  <script src="api.js"></script>
+  <script src="page-overview.js"></script>
+  <script src="page-settings.js"></script>
+  <script src="page-keys.js"></script>
+  <script src="page-models.js"></script>
+  <script src="page-nodes-api.js"></script>
+  <script src="page-nodes-ui.js"></script>
+  <script src="page-node-faults.js"></script>
+  <script src="page-fault-policies.js"></script>
+  <script src="page-appearance-api.js"></script>
+  <script src="page-appearance-ui.js"></script>
+  <script src="page-logs.js"></script>
+  <script src="page-httplog.js"></script>
+  <script src="page-db.js"></script>
+  <script src="page-fingerprint.js"></script>
+  <script src="admin.js"></script>
+</body>
+
+</html>

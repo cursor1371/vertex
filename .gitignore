@@ -1,0 +1,17 @@
+# 部署秘密与运行时数据不得提交；镜像只复制模板和源码。
+.env
+.env.*
+*.env
+/config/config.json
+/config/api_keys.txt
+/config/data.db*
+/config/state/
+/config/migrated/
+/logs/
+/docs/
+/assets/
+/vproxy
+/vertex-proxy
+/vertex-proxy.exe
+*.test
+*.md
